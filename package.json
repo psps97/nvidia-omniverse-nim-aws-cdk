@@ -1,0 +1,26 @@
+{
+  "name": "nvidia-omniverse-cdk",
+  "version": "0.1.0",
+  "description": "NVIDIA Omniverse (Kit/RTX) + NIM on AWS GPU EC2 — Digital Twin PoC (CDK, TypeScript)",
+  "bin": {
+    "nvidia-omniverse-cdk": "bin/app.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy",
+    "diff": "cdk diff"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "~5.6.0",
+    "ts-node": "^10.9.2",
+    "aws-cdk": "2.1118.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.176.0",
+    "cdk-nag": "^2.34.0",
+    "constructs": "^10.4.0"
+  }
+}

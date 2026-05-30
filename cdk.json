@@ -1,0 +1,48 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/app.ts",
+  "watch": {
+    "include": ["**"],
+    "exclude": [
+      "README.md",
+      "cdk*.json",
+      "**/*.d.ts",
+      "**/*.js",
+      "tsconfig.json",
+      "package*.json",
+      "node_modules",
+      "dist"
+    ]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:validateSnapshotRemovalPolicy": true,
+    "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true,
+    "@aws-cdk/core:enablePartitionLiterals": true,
+    "@aws-cdk/aws-ecs:disableExplicitDeploymentControllerForCircuitBreaker": true,
+
+    "_comment_params": "아래는 배포 시 -c 로 덮어쓰는 입력 파라미터의 기본값. 고객 확정 후 채움.",
+    "deploymentMode": "private",
+    "instanceType": "g7e.4xlarge",
+    "allowedCidr": "",
+    "vpcId": "",
+    "subnetIds": "",
+    "availabilityZones": "",
+    "subnetIndex": 0,
+    "createVpc": false,
+    "keyPairName": "",
+    "assetBucketName": "",
+    "region": "ap-northeast-2",
+    "installNim": false,
+    "ngcSecretArn": "",
+    "nimImage": "nvcr.io/nim/nvidia/domino-automotive-aero:2.1.0-41313772",
+    "nimPort": 8000,
+    "rootVolumeSizeGb": 500,
+    "retainDataOnDelete": false,
+    "installCodeServer": false,
+    "dcvCertSecretArn": "",
+    "projectTag": "omniverse-poc",
+    "ownerTag": ""
+  }
+}
