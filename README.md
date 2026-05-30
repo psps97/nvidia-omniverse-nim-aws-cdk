@@ -256,6 +256,120 @@ CloudWatch Log Group + (public)EIP / (createVpc)VPC·NAT·Flow Log.
 
 ---
 
+## 스크립트 (`scripts/`)
+
+세 개의 헬퍼 스크립트를 제공한다. 용도가 다르니 아래 표로 먼저 구분한다.
+
+| 스크립트 | 실행 위치 | 권한 | 언제 쓰나 |
+|----------|-----------|------|-----------|
+| `create-ngc-secret.sh` | 배포 머신(로컬) | AWS 자격증명 | 배포 전 NGC 키를 Secrets Manager에 넣고 ARN 확보 |
+| `install-omniverse-host.sh` | EC2 안 | `sudo` | UserData가 실패했거나 CDK 없이 띄운 EC2에 전체 스택 수동 설치 |
+| `install-nim.sh` | EC2 안 | `sudo` | NIM만 설치/교체/재시작 (Kit·DCV는 그대로) |
+
+> ⚠️ `install-*` 두 스크립트는 EC2 인스턴스 내부에서 root로 실행한다(배포 머신 아님).
+> 정상 배포라면 UserData가 자동 설치하므로 둘 다 선택(옵션)이다 — 폴백·재설치·교체용.
+> 둘 다 멱등(여러 번 실행해도 안전)하게 작성됐다.
+
+### `create-ngc-secret.sh` — NGC 키를 Secrets Manager에 등록 (배포 머신)
+
+NIM pull에 필요한 NGC API Key를 시크릿으로 만들고 ARN을 출력한다. 그 ARN을
+`cdk deploy -c ngcSecretArn=<ARN>`으로 넘기면 부팅 중 NIM pull이 즉시 성공한다.
+
+```bash
+./scripts/create-ngc-secret.sh -p <your-profile>     # 프롬프트로 키 숨김 입력(권장)
+./scripts/create-ngc-secret.sh -n my-ngc -r ap-northeast-2 nvapi-xxxx   # 이름/리전/키 직접
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `[KEY]` (위치 인자) | (프롬프트) | NGC API Key. 생략 시 숨김 프롬프트(히스토리에 안 남음, 권장) |
+| `-n NAME` | `omniverse-ngc-api-key` | 시크릿 이름 |
+| `-r REGION` | `ap-northeast-2` | 리전 |
+| `-p PROFILE` | (환경 그대로) | AWS 프로파일 |
+
+- 이미 같은 이름의 시크릿이 있으면 값만 갱신(put), 없으면 생성(create).
+- 출력된 ARN을 그대로 `-c ngcSecretArn=`에 사용.
+
+### `install-omniverse-host.sh` — 호스트 패키지 전체 수동 설치 (EC2, 폴백)
+
+UserData와 동일한 계층(드라이버 검증 → Kit 런타임 라이브러리 → Vulkan/GL 검증 →
+Docker+Container Toolkit+NIM → DCV+Xorg → Python 3.12)을 멱등하게 설치한다.
+부트스트랩이 일부 실패했거나(`/var/log/omniverse-bootstrap.done` 미생성), CDK 없이
+EC2를 수동 기동한 경우의 폴백.
+
+```bash
+# EC2 안에서 root로
+sudo ./scripts/install-omniverse-host.sh                  # 드라이버 검증 + Kit 라이브러리 + DCV (기본)
+sudo ./scripts/install-omniverse-host.sh --with-nim       # + Docker/Toolkit + NIM (NGC 키 프롬프트)
+sudo ./scripts/install-omniverse-host.sh --with-python312 # + Python 3.12 (CAD 변환/USD 스크립팅)
+
+# CDK가 만든 시크릿 재사용 (키·비번을 프롬프트 없이 주입)
+sudo ./scripts/install-omniverse-host.sh --with-nim \
+  --ngc-secret <NgcSecretArn> --dcv-secret <DcvSecretArn>
+
+# 특정 단계만 재시도 (예: DCV만 다시 — Kit 라이브러리는 건너뜀)
+sudo ./scripts/install-omniverse-host.sh --skip-kit-libs
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--with-nim` | off | Docker + Container Toolkit 설치 + NIM pull/run |
+| `--nim-image IMG` | `domino-automotive-aero:2.1.0-41313772` | NIM 이미지 (`--with-nim` 시) |
+| `--nim-port PORT` | `8000` | NIM 노출 포트 |
+| `--ngc-key KEY` | (프롬프트) | NGC API Key 직접 입력 |
+| `--ngc-secret ARN` | - | NGC 키를 Secrets Manager에서 조회 (`--ngc-key` 대신) |
+| `--dcv-password PW` | (프롬프트) | DCV(ubuntu) 비밀번호 직접 입력 |
+| `--dcv-secret ARN` | - | DCV 비번을 Secrets Manager에서 조회 |
+| `--with-python312` | off | Python 3.12(deadsnakes) 설치 |
+| `--region REGION` | `ap-northeast-2` | 시크릿 조회 리전 |
+| `--skip-dcv` | off | DCV 단계 건너뛰기 |
+| `--skip-kit-libs` | off | Kit 런타임 라이브러리 단계 건너뛰기 |
+| `-h, --help` | - | 전체 도움말 |
+
+- 단계 구성: ① 드라이버 검증 → ④ Kit 라이브러리 → Vulkan/GL 검증 →
+  ② Docker/Toolkit(+NIM, `--with-nim`) → ⑤ DCV+Xorg(+비번) → ⑥ Python 3.12(`--with-python312`).
+- 끝에 진단 체크리스트(nvidia-smi / vulkan ICD / docker / dcvserver / python3.12 / NIM)를
+  출력하고, 로그는 `/var/log/omniverse-install.log`에 남는다(완료 시 `*.done`).
+- NGC 키·DCV 비번은 직접 입력(`--ngc-key`/`--dcv-password`), 시크릿 조회(`--ngc-secret`/
+  `--dcv-secret`), 프롬프트(숨김) 중 택1. 시크릿 조회는 EC2 IAM Role에 읽기 권한 필요.
+- ⚠️ kit-app-template 빌드는 대화형이라 포함되지 않는다 → DCV 접속 후 수동(아래 "2) Kit 앱 설치").
+
+### `install-nim.sh` — NIM 컨테이너 전용 (EC2, 모델 교체·재시작)
+
+NIM 한 가지만 다룬다: Docker/Toolkit 설치(필요 시) → nvcr.io 로그인 → pull → run →
+헬스체크(`/v1/health/ready`가 READY 될 때까지 최대 ~10분 폴링). 모델만 바꾸거나 NIM
+컨테이너만 다시 띄울 때 host 스크립트 전체를 돌릴 필요 없이 이걸 쓴다.
+
+```bash
+sudo ./scripts/install-nim.sh                              # 기본 모델 pull+run+헬스체크
+sudo ./scripts/install-nim.sh --ngc-secret <NgcSecretArn>  # NGC 키를 시크릿에서 조회
+sudo ./scripts/install-nim.sh --nim-image <IMG> --nim-port 8001   # 다른 NIM 모델로 교체
+sudo ./scripts/install-nim.sh --gpu-device 1               # 멀티 GPU: GPU 1에만 배치
+sudo ./scripts/install-nim.sh --skip-docker --no-run       # pull만 (Docker 이미 있음)
+```
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--nim-image IMG` | `domino-automotive-aero:2.1.0-41313772` | NIM 이미지 |
+| `--nim-port PORT` | `8000` | 노출 포트 |
+| `--ngc-key KEY` | (프롬프트) | NGC API Key 직접 입력 |
+| `--ngc-secret ARN` | - | NGC 키를 Secrets Manager에서 조회 |
+| `--region REGION` | `ap-northeast-2` | 시크릿 조회 리전 |
+| `--gpu-device N` | `all` | 특정 GPU에만 배치 (멀티 GPU 분리, 예: `1`) |
+| `--cache-dir DIR` | `/opt/nim/cache` | 모델 캐시 호스트 경로 |
+| `--name NAME` | `nim` | 컨테이너 이름 |
+| `--no-run` | off | pull까지만, 컨테이너 실행 안 함 |
+| `--skip-docker` | off | Docker/Toolkit 설치 건너뛰기 (이미 있을 때) |
+| `-h, --help` | - | 전체 도움말 |
+
+- 멱등성: 기존 동명 컨테이너를 `docker rm -f` 후 재실행 → 모델 교체/재시작에 안전.
+- 헬스체크 중 컨테이너가 죽으면 `docker logs` 일부를 출력하고 중단(원인 파악 용이).
+- 끝에 요약(이미지/컨테이너 상태/엔드포인트/로그 명령) 출력. 로그: `/var/log/nim-install.log`.
+- `--gpu-device`는 g7e.12xlarge/g6e.12xlarge 등 멀티 GPU에서 NIM을 특정 GPU에 고정할 때
+  (Kit과 GPU 분리 — CLAUDE.md 섹션 5-3). 단일 GPU는 기본 `all`로 충분.
+
+---
+
 ## 배포 후 검증 & Omniverse Kit 설치
 
 DCV로 접속(`https://<IP>:8443`, ubuntu / DCV 시크릿 비번)한 뒤, 상단 **Terminal**을
@@ -264,46 +378,20 @@ DCV로 접속(`https://<IP>:8443`, ubuntu / DCV 시크릿 비번)한 뒤, 상단
 
 ### 0) (옵션) 부트스트랩 폴백 — 수동 설치 스크립트
 
-정상 배포라면 UserData가 패키지를 자동 설치하므로 이 단계는 건너뛴다. 다만
-부트스트랩이 일부 실패했거나(`/var/log/omniverse-bootstrap.done` 미생성), CDK 없이
-EC2를 수동 기동한 경우를 위한 폴백으로 `scripts/install-omniverse-host.sh`를 제공한다.
-UserData와 동일한 계층(드라이버 검증→Kit 라이브러리→DCV→Docker/NIM→Python 3.12)을
-멱등하게 재설치한다 (여러 번 실행해도 안전).
+정상 배포라면 UserData가 패키지를 자동 설치하므로 이 단계는 건너뛴다. 부트스트랩이
+일부 실패했거나(`/var/log/omniverse-bootstrap.done` 미생성) CDK 없이 EC2를 수동
+기동한 경우, EC2 안에서 아래 폴백 스크립트로 재설치한다 (옵션·전체 사용법은 위
+"[스크립트 (`scripts/`)](#스크립트-scripts)" 섹션 참고).
 
 ```bash
-# EC2 안에서 (SSH 또는 DCV 터미널), root로 실행
-sudo ./scripts/install-omniverse-host.sh                  # 드라이버 검증 + Kit 라이브러리 + DCV
-sudo ./scripts/install-omniverse-host.sh --with-nim       # + Docker/Container Toolkit + NIM (NGC 키 프롬프트)
-sudo ./scripts/install-omniverse-host.sh --with-python312 # + Python 3.12 (CAD 변환/USD 스크립팅)
+# 전체 스택 수동 설치 (드라이버·Kit 라이브러리·DCV, 필요 시 + NIM/Python)
+sudo ./scripts/install-omniverse-host.sh --with-nim --ngc-secret <NgcSecretArn> --dcv-secret <DcvSecretArn>
 
-# Secrets Manager 사용 시 (CDK 배포가 만든 시크릿 ARN 재사용)
-sudo ./scripts/install-omniverse-host.sh --with-nim \
-  --ngc-secret <NgcSecretArn> --dcv-secret <DcvSecretArn>
-
-# 특정 단계만 재시도 (예: DCV만 다시 — Kit 라이브러리는 건너뜀)
-sudo ./scripts/install-omniverse-host.sh --skip-kit-libs
-
-sudo ./scripts/install-omniverse-host.sh --help           # 전체 옵션
+# NIM만 설치/교체/재시작
+sudo ./scripts/install-nim.sh --ngc-secret <NgcSecretArn>
 ```
 
-- 끝에 진단 체크리스트(nvidia-smi / vulkan ICD / docker / dcvserver / NIM 컨테이너)를
-  출력하고, 로그는 `/var/log/omniverse-install.log`에 남는다.
-- NGC 키·DCV 비번은 `--ngc-key`/`--dcv-password` 직접 입력, 시크릿 ARN(`--ngc-secret`/
-  `--dcv-secret`) 조회, 또는 프롬프트(숨김 입력) 중 택1.
-- kit-app-template 빌드는 대화형이라 이 스크립트에 포함되지 않는다 (아래 2절 수동 진행).
-
-NIM만 따로 다루고 싶으면(모델 교체·NIM 컨테이너만 재시작·특정 GPU 배치)
-`scripts/install-nim.sh`를 쓴다. Docker/Toolkit 설치(필요 시)→pull→run→헬스체크(모델
-READY 대기)까지 NIM 한 가지만 멱등하게 처리한다.
-
-```bash
-sudo ./scripts/install-nim.sh                              # 기본 모델 pull+run+헬스체크
-sudo ./scripts/install-nim.sh --ngc-secret <NgcSecretArn>  # NGC 키를 시크릿에서 조회
-sudo ./scripts/install-nim.sh --nim-image <IMG> --nim-port 8001   # 다른 NIM 모델로 교체
-sudo ./scripts/install-nim.sh --gpu-device 1               # 멀티 GPU: GPU 1에만 배치
-sudo ./scripts/install-nim.sh --skip-docker                # Docker 이미 있을 때 (pull/run만)
-sudo ./scripts/install-nim.sh --help                       # 전체 옵션
-```
+> kit-app-template 빌드는 대화형이라 어느 스크립트에도 포함되지 않는다 → 아래 2)에서 수동 진행.
 
 ### 1) 설치 구성요소 확인 (이미 떠 있음)
 
