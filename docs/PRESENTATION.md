@@ -178,6 +178,19 @@ AWS CDK(TypeScript) 코드 한 벌. 명령 한 번으로 디지털 트윈 구동
 - AI 모델 도메인 — 검증에 쓴 모델은 자동차 공력 전용. 타 도메인은 모델 학습 필요(환경이 아닌 모델 과제)
 - 앱 빌드 일부 수동 — kit-app-template 최초 생성이 대화형(이후 골든 AMI로 단축)
 
+### 연구원 개별 작업과 NIM 추론 — 인스턴스 선택
+
+NIM 추론(~40GB) + Kit 렌더링(~15GB)을 합치면 약 55GB의 GPU 메모리가 필요하다.
+연구원 한 명의 개별 작업은 단일 인스턴스로 충분하다.
+
+| 사용 형태 | 권장 구성 |
+|-----------|-----------|
+| 연구원 1명, NIM + Kit 동시 작업 | g7e.4xlarge 한 대로 충분 (96GB 단일 GPU에 공존) |
+| 더 큰 모델·다중 워크로드 | 멀티 GPU 인스턴스에서 NIM/Kit을 GPU별로 분리 |
+| 여러 연구원이 같은 NIM 공유 | NIM 전용 인스턴스를 분리하고 API로 공유 |
+
+- 개별 작업은 한 대로 단순하게, 공유·확장이 필요해지면 그때 분리하는 식으로 점진 확장 가능.
+
 ---
 
 ## 10. 다음 단계
@@ -191,7 +204,45 @@ AWS CDK(TypeScript) 코드 한 벌. 명령 한 번으로 디지털 트윈 구동
 
 ---
 
-## 11. 핵심 메시지 (마무리 슬라이드)
+## 11. NIM과 생성형 AI(Bedrock·Claude) 병행 활용 — 참고 자료
+
+NIM은 특정 작업(물리 추론·USD 생성 등)에 특화된 NVIDIA 모델이고, Amazon Bedrock의
+Claude 같은 범용 LLM은 자연어 이해·코드 생성·에이전트 오케스트레이션에 강하다.
+둘은 경쟁이 아니라 보완 관계로, 트윈 워크플로우에서 함께 쓸 수 있다.
+
+NVIDIA 공식 — Omniverse를 LLM(Claude 등)과 연동:
+- Integrate Physical AI Capabilities into Existing Apps with NVIDIA Omniverse Libraries
+  <https://developer.nvidia.com/blog/integrate-physical-ai-capabilities-into-existing-apps-with-nvidia-omniverse-libraries/>
+  — Omniverse 라이브러리를 MCP 서버로 노출해 "Claude·Cursor 같은 도구가 호출"하도록 함 (2026-04-08)
+- Kit USD Agents (GitHub, Apache 2.0)
+  <https://github.com/NVIDIA-Omniverse/kit-usd-agents>
+  — 자연어로 USD 파이썬 코드 생성. MCP로 Claude/Cursor 연동, 로컬 NIM 서빙도 지원
+
+NIM을 AWS에 배포 (운영화 경로):
+- NVIDIA 공식: NIM for LLMs on AWS (EKS · SageMaker)
+  <https://docs.nvidia.com/nim/large-language-models/latest/deployment/csp-deployment/aws.html>
+- AWS 블로그: NVIDIA NIM on Amazon SageMaker (2024-08-29)
+  <https://aws.amazon.com/blogs/machine-learning/get-started-with-nvidia-nim-inference-microservices-on-amazon-sagemaker/>
+
+Amazon Bedrock의 Claude / Claude Code:
+- Claude on Amazon Bedrock (Anthropic 공식)
+  <https://platform.claude.com/docs/en/api/claude-on-amazon-bedrock>
+- Claude Code on Amazon Bedrock (Anthropic 공식)
+  <https://code.claude.com/docs/en/amazon-bedrock>
+  — 본 프로젝트도 Bedrock의 Claude를 Claude Code로 사용해 개발
+
+활용 그림(예시):
+- 범용 LLM(Bedrock Claude)이 자연어 지시를 받아 USD 씬 조작·코드 생성을 오케스트레이션
+- 특화 NIM이 물리 추론(CFD surrogate 등) 수행
+- Omniverse Kit이 결과를 3D로 렌더링 → 사람은 자연어로 트윈을 다루고 결과를 즉시 본다
+
+> 참고: NIM을 Amazon Bedrock에서 직접 호출하는 형태(Bedrock Marketplace 등록 등)는
+> 공식 확인된 자료를 찾지 못했다. 현재 검증된 조합은 "NIM=EC2/EKS/SageMaker 배포 +
+> Bedrock=Claude 호출"을 각각 AWS에서 운용하는 방식이다.
+
+---
+
+## 12. 핵심 메시지 (마무리 슬라이드)
 
 - 온프렘에서 막혔던 디지털 트윈 구동을 AWS에서 검증했다.
 - 실패 원인은 GPU 성능이 아니라 환경 제약이었고, AWS에서 구조적으로 해소된다.
