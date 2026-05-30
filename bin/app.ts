@@ -16,7 +16,12 @@ const config = parseConfig(app);
 // 다른 리전 테스트가 꼭 필요하면 -c region=... 으로만 덮어쓴다.
 const region = (app.node.tryGetContext('region') as string | undefined) ?? 'ap-northeast-2';
 
-new OmniverseNimStack(app, 'OmniverseNimStack', {
+// 스택 이름. 같은 VPC에 2호기 이상을 독립 배포하려면 -c stackName=... 으로 다르게 준다.
+// (기본값 그대로 재배포하면 기존 스택 업데이트 = 기존 EC2 교체 — 새 인스턴스가 아님)
+const stackName =
+  (app.node.tryGetContext('stackName') as string | undefined) ?? 'OmniverseNimStack';
+
+new OmniverseNimStack(app, stackName, {
   config,
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT ?? process.env.AWS_ACCOUNT_ID,

@@ -167,6 +167,7 @@ cdk deploy ... -c dcvCertSecretArn=arn:aws:secretsmanager:ap-northeast-2:<acct>:
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
+| `stackName` | `OmniverseNimStack` | 스택 이름. 같은 VPC에 2호기 이상 독립 배포 시 다르게 지정 (아래 참고) |
 | `deploymentMode` | `private` | `private`(사내전용) / `public`(테스트) |
 | `instanceType` | `g7e.4xlarge` | g7e.4xlarge / g7e.12xlarge / g6e.4xlarge / g6e.12xlarge (그 외 합성 차단) |
 | `allowedCidr` | (필수) | 접속 허용 대역. private=사내망, public=내 IP/32. 콤마로 다중 입력. `0.0.0.0/0` 금지 |
@@ -177,7 +178,7 @@ cdk deploy ... -c dcvCertSecretArn=arn:aws:secretsmanager:ap-northeast-2:<acct>:
 | `createVpc` | `false` | public 테스트용 신규 VPC 생성 (vpcId/subnetIds 대신) |
 | `keyPairName` | - | 기존 EC2 키페어 이름 (SSH용, 미지정 시 SSM만) |
 | `installNim` | `false` | NIM 컨테이너 설치(Docker+toolkit+pull) 여부 |
-| `nimImage` | `domino-automotive-aero:latest` | pull할 NIM 이미지 (installNim 시) |
+| `nimImage` | `domino-automotive-aero:2.1.0-41313772` | pull할 NIM 이미지 (installNim 시). ⚠️ NGC에 `:latest` 태그 없음 → 실제 태그 명시 |
 | `nimPort` | `8000` | NIM 추론 API 포트 (SG 인바운드 추가) |
 | `rootVolumeSizeGb` | `500` | 루트 gp3 용량 (OS+캐시 통합) |
 | `assetBucketName` | - | 모델/에셋 전송용 S3 버킷 (IAM 권한 부여) |
@@ -203,6 +204,30 @@ cdk deploy -c deploymentMode=public -c createVpc=true \
   -c allowedCidr=<내공인IP>/32
 ```
 
+### 같은 VPC에 2호기 이상 배포 (충돌 주의)
+
+기존 VPC 모드(private/public)는 IGW·NAT를 만들지 않고 참조만 하므로, 같은 VPC에
+EC2를 여러 대 두어도 네트워크 충돌은 없다 (SG·IAM·Secret·LogGroup은 스택마다 자동
+이름 → 겹치지 않음). 단 **스택 이름을 반드시 다르게** 줘야 한다.
+
+```bash
+# 1호기 (기본 이름 OmniverseNimStack)
+cdk deploy -c vpcId=vpc-xxxx -c subnetIds=subnet-2a,subnet-2b \
+  -c availabilityZones=ap-northeast-2a,ap-northeast-2b -c allowedCidr=10.1.0.0/16
+
+# 2호기 — stackName을 다르게 (같은 VPC, 독립 인스턴스)
+cdk deploy -c stackName=OmniverseNimStack2 \
+  -c vpcId=vpc-xxxx -c subnetIds=subnet-2a,subnet-2b \
+  -c availabilityZones=ap-northeast-2a,ap-northeast-2b -c allowedCidr=10.1.0.0/16
+```
+
+> ⚠️ `stackName`을 바꾸지 않고 재배포하면 새 인스턴스가 아니라 **기존 스택 업데이트
+> = 기존 EC2 교체(replace)**가 된다. 2호기는 반드시 다른 `stackName`으로.
+> 확인 필요: G/VT vCPU 쿼터(2대 합산), 같은 AZ의 g7e capacity(폴백은 `subnetIndex`),
+> public 다수 시 EIP 쿼터. NGC 시크릿 ARN은 여러 스택이 공유해도 무방.
+> `createVpc=true`는 매번 새 VPC(+NAT 1개)를 만든다 → 2번 쓰면 NAT 비용 2배·CIDR
+> (`10.20.0.0/16`) 중복. 2호기를 같은 VPC에 둘 땐 `createVpc` 없이 `vpcId`로 참조.
+
 ---
 
 ## 프로젝트 구조
@@ -214,6 +239,10 @@ nvidia-omniverse-cdk/
 │   ├── config.ts               # 파라미터 검증 (허용 4종 / 0.0.0.0/0 차단 / 모드별 필수값)
 │   ├── omniverse-nim-stack.ts  # 메인 스택 (VPC/SG/IAM/Secrets/EC2/EIP)
 │   └── user-data.ts            # 부트스트랩 (드라이버→Kit라이브러리→DCV→Docker/NIM)
+├── scripts/
+│   ├── create-ngc-secret.sh        # NGC API Key를 Secrets Manager에 생성 → ARN 출력
+│   ├── install-omniverse-host.sh   # (옵션) 호스트 패키지 전체 수동 설치 — UserData 폴백
+│   └── install-nim.sh              # (옵션) NIM 컨테이너만 설치/실행/헬스체크 (모델 교체용)
 ├── cdk.json                    # context 기본값 (배포 시 -c 로 덮어씀)
 ├── package.json / tsconfig.json
 ├── CLAUDE.md                   # 상세 설계/요구사항
@@ -232,6 +261,49 @@ CloudWatch Log Group + (public)EIP / (createVpc)VPC·NAT·Flow Log.
 DCV로 접속(`https://<IP>:8443`, ubuntu / DCV 시크릿 비번)한 뒤, 상단 **Terminal**을
 열어 아래를 확인/실행한다. (부트스트랩은 드라이버·DCV·Kit 런타임 라이브러리·NIM까지
 자동 설치하고, **Omniverse Kit 앱만 수동 설치** — 대화형이라 자동화 불가.)
+
+### 0) (옵션) 부트스트랩 폴백 — 수동 설치 스크립트
+
+정상 배포라면 UserData가 패키지를 자동 설치하므로 이 단계는 건너뛴다. 다만
+부트스트랩이 일부 실패했거나(`/var/log/omniverse-bootstrap.done` 미생성), CDK 없이
+EC2를 수동 기동한 경우를 위한 폴백으로 `scripts/install-omniverse-host.sh`를 제공한다.
+UserData와 동일한 계층(드라이버 검증→Kit 라이브러리→DCV→Docker/NIM→Python 3.12)을
+멱등하게 재설치한다 (여러 번 실행해도 안전).
+
+```bash
+# EC2 안에서 (SSH 또는 DCV 터미널), root로 실행
+sudo ./scripts/install-omniverse-host.sh                  # 드라이버 검증 + Kit 라이브러리 + DCV
+sudo ./scripts/install-omniverse-host.sh --with-nim       # + Docker/Container Toolkit + NIM (NGC 키 프롬프트)
+sudo ./scripts/install-omniverse-host.sh --with-python312 # + Python 3.12 (CAD 변환/USD 스크립팅)
+
+# Secrets Manager 사용 시 (CDK 배포가 만든 시크릿 ARN 재사용)
+sudo ./scripts/install-omniverse-host.sh --with-nim \
+  --ngc-secret <NgcSecretArn> --dcv-secret <DcvSecretArn>
+
+# 특정 단계만 재시도 (예: DCV만 다시 — Kit 라이브러리는 건너뜀)
+sudo ./scripts/install-omniverse-host.sh --skip-kit-libs
+
+sudo ./scripts/install-omniverse-host.sh --help           # 전체 옵션
+```
+
+- 끝에 진단 체크리스트(nvidia-smi / vulkan ICD / docker / dcvserver / NIM 컨테이너)를
+  출력하고, 로그는 `/var/log/omniverse-install.log`에 남는다.
+- NGC 키·DCV 비번은 `--ngc-key`/`--dcv-password` 직접 입력, 시크릿 ARN(`--ngc-secret`/
+  `--dcv-secret`) 조회, 또는 프롬프트(숨김 입력) 중 택1.
+- kit-app-template 빌드는 대화형이라 이 스크립트에 포함되지 않는다 (아래 2절 수동 진행).
+
+NIM만 따로 다루고 싶으면(모델 교체·NIM 컨테이너만 재시작·특정 GPU 배치)
+`scripts/install-nim.sh`를 쓴다. Docker/Toolkit 설치(필요 시)→pull→run→헬스체크(모델
+READY 대기)까지 NIM 한 가지만 멱등하게 처리한다.
+
+```bash
+sudo ./scripts/install-nim.sh                              # 기본 모델 pull+run+헬스체크
+sudo ./scripts/install-nim.sh --ngc-secret <NgcSecretArn>  # NGC 키를 시크릿에서 조회
+sudo ./scripts/install-nim.sh --nim-image <IMG> --nim-port 8001   # 다른 NIM 모델로 교체
+sudo ./scripts/install-nim.sh --gpu-device 1               # 멀티 GPU: GPU 1에만 배치
+sudo ./scripts/install-nim.sh --skip-docker                # Docker 이미 있을 때 (pull/run만)
+sudo ./scripts/install-nim.sh --help                       # 전체 옵션
+```
 
 ### 1) 설치 구성요소 확인 (이미 떠 있음)
 

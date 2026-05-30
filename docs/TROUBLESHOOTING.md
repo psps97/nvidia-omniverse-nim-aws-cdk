@@ -28,6 +28,34 @@
 - 원인: 보안 베스트프랙티스 위반(또는 의도적 예외 미처리).
 - 해결: 실제 문제면 수정, 의도적이면 `NagSuppressions`에 사유와 함께 추가. (무음 무시 금지)
 
+### 1-5. 2호기 배포했는데 기존 EC2가 교체됨 (새 인스턴스가 안 생김)
+- 증상: 같은 VPC에 인스턴스를 하나 더 만들려고 `cdk deploy`를 다시 돌렸더니 새 EC2가
+  아니라 기존 인스턴스가 교체(replace)되거나 업데이트됨.
+- 원인: 스택 이름이 같으면 같은 CloudFormation 스택을 갱신한다. 기본 `stackName`은
+  `OmniverseNimStack` 하나로 고정 → 그대로 재배포하면 1호기를 덮어씀.
+- 해결: 2호기는 `-c stackName=OmniverseNimStack2`처럼 다른 이름으로 배포.
+  ```bash
+  cdk deploy -c stackName=OmniverseNimStack2 \
+    -c vpcId=vpc-xxxx -c subnetIds=subnet-2a,subnet-2b \
+    -c availabilityZones=ap-northeast-2a,ap-northeast-2b -c allowedCidr=10.1.0.0/16
+  ```
+  `cdk list -c stackName=...`로 의도한 스택 이름이 뜨는지 먼저 확인.
+
+### 1-6. 같은 VPC에 여러 대 — IGW/NAT/서브넷 충돌 우려
+- 증상: 같은 VPC에 2호기를 올릴 때 IGW·NAT GW·서브넷이 충돌하지 않을지 우려.
+- 원인/사실: 기존 VPC 모드(private/public + `vpcId` 참조)는 IGW·NAT·라우팅을 만들지
+  않고 참조만 한다(`Vpc.fromVpcAttributes`). SG·IAM Role·Secret·LogGroup은 스택마다
+  자동 이름(스택 해시) → 이름 충돌 없음. 같은 서브넷 공유도 정상.
+- 결론: 기존 VPC 모드는 네트워크 충돌 없음 (스택 이름만 다르면 됨 — 1-5).
+- 단, 확인 필요한 공유 한도/비용:
+  - G/VT 온디맨드 vCPU 쿼터(`L-DB2E81BA`)는 2대 합산 → 부족하면 2호기 기동 거절.
+  - 같은 AZ의 g7e capacity(1-3) → 폴백은 `subnetIndex`로 다른 AZ.
+  - public 다수면 EIP 쿼터(기본 5) 주의.
+  - NGC 시크릿 ARN은 여러 스택이 공유해도 무방(참조 + 읽기권한만).
+- ⚠️ `createVpc=true`는 예외: 매번 새 VPC + 자체 NAT GW 1개를 생성한다. 2번 쓰면
+  NAT 비용 2배 + CIDR(`10.20.0.0/16`) 중복. 같은 VPC에 2호기를 둘 땐 `createVpc` 없이
+  `vpcId`로 기존 VPC를 참조할 것.
+
 ---
 
 ## 2. 부트스트랩(UserData) 단계
