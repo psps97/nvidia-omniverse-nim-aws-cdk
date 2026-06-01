@@ -1,4 +1,4 @@
-# NVIDIA Omniverse on AWS — 디지털 트윈 PoC
+# NVIDIA Omniverse on AWS — 디지털 트윈 구축 가이드
 
 산업 설비 디지털 트윈 구축을 위한 NVIDIA Omniverse(Kit/RTX) + NIM
 배포용 AWS CDK 프로젝트입니다. (Nucleus는 미사용 — 로컬 USD 파일/볼륨 사용)
@@ -589,7 +589,7 @@ PhysicsNeMo  →  PhysicsNeMo Train  →  NIM(추론 API)  →  Omniverse Kit-CA
 실시간 루프: Kit-CAE에서 형상 변경 → NIM 추론(수 초) → 압력장/유속 3D 렌더.
 핵심 가치: 전통 CFD 수 시간 → AI surrogate 수 초. 상세는 `CLAUDE.md` 섹션 0-3.
 
-> 본 PoC(Phase 1)는 pre-trained NIM을 NGC에서 pull → 시각화까지만 검증합니다.
+> 본 구성(Phase 1)은 pre-trained NIM을 NGC에서 pull → 시각화까지만 검증합니다.
 > PhysicsNeMo(전처리·학습)는 대상 도메인 커스텀 모델이 필요한 Phase 2 과제입니다.
 
 ## NGC API Key 발급 (NIM pull용)
