@@ -1077,6 +1077,24 @@ nvidia-omniverse-cdk/
 - Blueprint 옵션(`installBlueprint`): prebuilt 이미지 경로 확보 시에만 의미
   (from-source 빌드는 urm.nvidia.com 사내 의존으로 외부 불가 — 섹션 0-1).
 
+### Nucleus 협업 서버 추가 (다중 사용자 동시 편집 시)
+
+현재 구성은 로컬 USD 파일 사용(단일 사용자). 다중 사용자가 같은 씬을 실시간
+동시 편집하려면 Nucleus Enterprise를 별도 인스턴스로 추가한다.
+
+연동 구조:
+```
+[기존 g7e Kit+NIM+DCV] ──omniverse://nucleus-ip/scene.usd──→ [Nucleus EC2 (m5.xlarge)]
+```
+
+- Kit은 Nucleus 프로토콜을 내장 → 코드 변경 없이 접속 URL만 로컬→Nucleus로 변경
+- 같은 VPC 프라이빗 서브넷 내 통신, SG에 TCP 3009/3019/3020/3030 허용
+- Nucleus EC2: GPU 불필요, m5.xlarge(4vCPU/16GB) 정도면 충분 (~$0.23/hr)
+- 에셋 저장: Nucleus 인스턴스 EBS (용량에 따라 가변)
+- NGC Key 재활용 가능 (Nucleus Enterprise 이미지도 nvcr.io에서 pull)
+- 라이선스: Nucleus Enterprise 자체 호스팅 무료 여부 확인 필요 (NVIDIA 정책 변동 가능)
+- 실익 분기: 2명 이상 동시 편집 시 가치 있음. 1명이면 로컬 파일로 충분.
+
 ### aws-samples 참고점 (github.com/aws-samples/nvidia-omniverse-modular-solution-with-aws-cdk)
 - 모듈 분리: Workstation / Fleet / Nucleus를 독립 스택(모듈)으로. 우리는 단일 스택 →
   Nucleus·다중 워크스테이션 추가 시 옵션 플래그보다 모듈 분리가 깔끔.
