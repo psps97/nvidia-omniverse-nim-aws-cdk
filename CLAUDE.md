@@ -171,8 +171,8 @@ AI-Powered CAE 시각화 데모. Pre-trained CFD NIM + Kit-CAE를 EC2에서
 
 1. 비용 정정 (중요):
    - 사양서 "g7e.12xlarge ~$7-8/hr" → 실측 $10.187/hr (서울, 2026-05-29 Pricing API).
-   - 월 40시간 ≈ $407/월 (사양서 $320은 과소 추정). EBS 500GB gp3 ≈ $40/월 별도.
-   - g7e.4xlarge는 $4.916/hr → 월 40h ≈ $197/월. 단일 GPU 구성엔 이쪽이 더 합리적.
+   - 월 160시간(8h×20일) ≈ $1,630/월. EBS 500GB gp3 ≈ $40/월 별도.
+   - g7e.4xlarge는 $4.916/hr → 월 160h ≈ $787/월. 단일 GPU 구성엔 이쪽이 더 합리적.
 
 2. 인스턴스 1순위 재검토:
    - VRAM 산정: AeroNIM ~40GB + Kit ~15GB ≈ 55GB. RTX PRO 6000 96GB 단일로 충분.
@@ -201,7 +201,7 @@ AI-Powered CAE 시각화 데모. Pre-trained CFD NIM + Kit-CAE를 EC2에서
 ### 결론
 
 사양서는 전반적으로 적합. 확정/수정 사항:
-- (a) 비용 정정: g7e.12xlarge $10.2/hr (사양서 $7-8 → 실측), 월 40h ≈ $407.
+- (a) 비용 정정: g7e.12xlarge $10.2/hr (사양서 $7-8 → 실측), 월 160h ≈ $1,630.
 - (b) 1순위 인스턴스: 단일 GPU로 충분하므로 g7e.4xlarge 권장(비용 절반).
 - (c) 접근: DCV + WebRTC 둘 다 포함 (확정).
 - (d) 네트워크: 운영=private(사내망) + 검증=public(테스트) 둘 다, 코드 한 벌로 토글.
